@@ -623,7 +623,7 @@ const SYSTEM_BASE = `Du bist V.I.T.A. (Virtual Intelligence & Task Assistant), d
 BASICS:
 - 42 Jahre alt, lebt in Turgi, Aargau, Schweiz
 - Serviceberater bei Felix Emmenegger AG (BMW & MINI Autohaus)
-- Vater von Sophia (5 Jahre) – Abholen um 17:00 ist HEILIG
+- Vater von Giada (5 Jahre) – Abholen um 17:00 ist HEILIG
 - Sprachen: Deutsch, Englisch, Französisch, Italienisch
 - Lebensmotto: "Nur wer gegen den Strom schwimmt, verändert die Welt"
 
@@ -638,13 +638,13 @@ WIE VITA MIT IHM UMGEHT:
 - Komm zum Punkt – keine langen Erklärungen
 - Hilf ihm priorisieren und fokussieren
 - Gelegentlich auf Italienisch grüssen
-- Sophia um 17:00 immer erwähnen
+- Giada um 17:00 immer erwähnen
 - Er baut lieber als er plant – zeig schnelle Ergebnisse
 
 SIMULIERTE DATEN (falls keine echten Daten):
 - 12 E-Mails (BMW Rückruf 3er, KV Müller CHF 4'200, KV Weber CHF 1'800)
 - 7 WhatsApp (Kunden + privat)
-- Kalender: Übergaben, 14:00 Meeting, 17:00 Sophia
+- Kalender: Übergaben, 14:00 Meeting, 17:00 Giada
 - Incadea: 2 offene KV, Rückruf betrifft 4 Kunden
 
 PERSÖNLICHKEIT ALS VITA: Wie Jarvis – intelligent, präzise, direkt, trocken humorvoll.
@@ -701,7 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ═══════════════════════════════════════
-// GOOGLE OAUTH + GMAIL + CALENDAR
+// GOOGLE OAUTH PKCE + GMAIL + CALENDAR
 // ═══════════════════════════════════════
 const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly';
 let googleAccessToken = null;
@@ -709,18 +709,24 @@ let googleTokenExpiry = 0;
 let gmailMessages = [];
 let googleCalEvents = [];
 
-function googleLogin() {
+async function googleLogin() {
   const clientId = localStorage.getItem('vita_google_client_id');
   if (!clientId) { showGoogleModal(); return; }
   const redirectUri = window.location.origin + window.location.pathname;
   const state = gRandomString(16);
+  const verifier = gRandomString(64);
+  const challenge = await gCodeChallenge(verifier);
   localStorage.setItem('g_oauth_state', state);
+  localStorage.setItem('g_code_verifier', verifier);
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_type', 'token');
+  url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', GOOGLE_SCOPES);
   url.searchParams.set('state', state);
+  url.searchParams.set('code_challenge', challenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'consent');
   window.location.href = url.toString();
 }
@@ -745,25 +751,71 @@ function saveGoogleClientId() {
   googleLogin();
 }
 
-function initGoogle() {
-  // Handle OAuth implicit flow callback (token in hash)
-  if (window.location.hash.includes('access_token')) {
-    const params = new URLSearchParams(window.location.hash.substring(1));
-    const token = params.get('access_token');
-    const expiresIn = parseInt(params.get('expires_in') || '3600');
-    const state = params.get('state');
-    if (token && state === localStorage.getItem('g_oauth_state')) {
-      googleAccessToken = token;
-      googleTokenExpiry = Date.now() + (expiresIn - 60) * 1000;
-      localStorage.setItem('g_access_token', token);
+async function gExchangeCode(code) {
+  const clientId = localStorage.getItem('vita_google_client_id');
+  const verifier = localStorage.getItem('g_code_verifier');
+  const redirectUri = window.location.origin + window.location.pathname;
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code, redirect_uri: redirectUri,
+        client_id: clientId,
+        code_verifier: verifier
+      })
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      googleAccessToken = data.access_token;
+      googleTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+      localStorage.setItem('g_access_token', googleAccessToken);
       localStorage.setItem('g_token_expiry', googleTokenExpiry);
-      window.history.replaceState({}, '', window.location.pathname);
+      if (data.refresh_token) localStorage.setItem('g_refresh_token', data.refresh_token);
       updateGooglePill(true);
       loadGmail();
       loadGoogleCalendar();
-      addMessage('vita', '**Google verbunden!** 📧 Ich lade jetzt deine echten E-Mails und Kalender-Termine, Alessandro.', ['📧 Was ist dringend?', '☀️ Briefing']);
-      return;
+      addMessage('vita', '**Google verbunden!** 📧 Ich lade deine echten E-Mails und Kalender-Termine, Alessandro.', ['📧 Was ist dringend?', '☀️ Briefing']);
+    } else {
+      addMessage('vita', '⚠️ Google Auth fehlgeschlagen: ' + (data.error_description || data.error), []);
     }
+  } catch(e) {
+    addMessage('vita', '⚠️ Google Verbindungsfehler: ' + e.message, []);
+  }
+}
+
+async function gRefreshToken() {
+  const clientId = localStorage.getItem('vita_google_client_id');
+  const refreshToken = localStorage.getItem('g_refresh_token');
+  if (!clientId || !refreshToken) return false;
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId })
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      googleAccessToken = data.access_token;
+      googleTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+      localStorage.setItem('g_access_token', googleAccessToken);
+      localStorage.setItem('g_token_expiry', googleTokenExpiry);
+      return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
+function initGoogle() {
+  // Handle PKCE callback (code in URL params)
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const state = params.get('state');
+  if (code && state && state === localStorage.getItem('g_oauth_state')) {
+    window.history.replaceState({}, '', window.location.pathname);
+    gExchangeCode(code);
+    return;
   }
   // Check saved token
   const saved = localStorage.getItem('g_access_token');
@@ -774,6 +826,8 @@ function initGoogle() {
     updateGooglePill(true);
     loadGmail();
     loadGoogleCalendar();
+  } else if (localStorage.getItem('g_refresh_token')) {
+    gRefreshToken().then(ok => { if (ok) { updateGooglePill(true); loadGmail(); loadGoogleCalendar(); }});
   }
 }
 
@@ -784,8 +838,7 @@ function updateGooglePill(ok) {
 
 function googleDisconnect() {
   googleAccessToken = null;
-  localStorage.removeItem('g_access_token');
-  localStorage.removeItem('g_token_expiry');
+  ['g_access_token','g_token_expiry','g_refresh_token','g_oauth_state','g_code_verifier'].forEach(k => localStorage.removeItem(k));
   gmailMessages = [];
   googleCalEvents = [];
   updateGooglePill(false);
@@ -796,12 +849,22 @@ function googleDisconnect() {
 }
 
 async function gApi(url) {
-  if (!googleAccessToken || Date.now() > googleTokenExpiry) return null;
+  if (!googleAccessToken) return null;
+  if (Date.now() > googleTokenExpiry) {
+    const ok = await gRefreshToken();
+    if (!ok) return null;
+  }
   try {
     const res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + googleAccessToken } });
     if (!res.ok) { if (res.status === 401) { googleDisconnect(); } return null; }
     return await res.json();
   } catch(e) { return null; }
+}
+
+async function gCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
 
 async function loadGmail() {
@@ -920,7 +983,7 @@ function buildPriorityBar() {
     });
   });
 
-  // 3. Sophia 17:00 Reminder immer dabei
+  // 3. Giada 17:00 Reminder immer dabei
   const now = new Date();
   const sophia = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0, 0);
   if (now < sophia) {
@@ -928,10 +991,10 @@ function buildPriorityBar() {
     items.push({
       lvl: minLeft < 60 ? 'high' : 'low',
       tag: 'REMINDER',
-      title: '🎒 Sophia abholen 17:00',
+      title: '🎒 Giada abholen 17:00',
       meta: minLeft < 60 ? `In ${minLeft} Min!` : `In ${Math.floor(minLeft/60)}h ${minLeft%60}min`,
       action: '👨‍👧 17:00 Uhr',
-      onclick: `sendQuick('Wie viel Zeit habe ich noch bis Sophia abholen?')`
+      onclick: `sendQuick('Wie viel Zeit habe ich noch bis Giada abholen?')`
     });
   }
 
