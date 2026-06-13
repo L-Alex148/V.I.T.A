@@ -658,7 +658,7 @@ function buildSystemPrompt() {
     p += `\nMORGEN: ${tm.length>0?tm.map(e=>`${formatTime(e.start,e.allDay)} ${e.title}`).join(' | '):'Keine Termine'}`;
   }
   if (gmailMessages.length > 0) {
-    p += `\n\nECHTE GMAIL (${gmailMessages.length} ungelesen):\n`;
+    p += `\n\nGMAIL POSTEINGANG (${gmailMessages.length} Mails):\n`;
     p += gmailMessages.slice(0,8).map(m=>`VON: ${m.from} | BETREFF: ${m.subject} | ${gFmtDate(m.date)} | ${m.snippet.substring(0,80)}`).join('\n');
   }
   if (knowledgeBase.rawText.length > 100) {
@@ -691,7 +691,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const calLine = calSaved
         ? (te.length>0 ? `📅 Heute: **${te.map(e=>`${formatTime(e.start,e.allDay)} ${e.title}`).join(' · ')}**` : '📅 Kalender geladen · Heute keine Termine')
         : 'Verbinde iCloud-Kalender oder Google rechts.';
-      const gmailLine = googleConnected ? `📧 Gmail: **${gmailMessages.length} ungelesene Mails**` : '';
+      const gmailLine = googleConnected ? `📧 Gmail: **${gmailMessages.length} Mails im Posteingang**` : '';
       addMessage('vita',
         `${g}, Alessandro. **V.I.T.A. 3.2** – alle Systeme aktiv.\n\n${calLine}${gmailLine ? '\n' + gmailLine : ''}\n\nWas steht heute an?`,
         ['☀️ Briefing', '🎯 Top 3', '📧 E-Mails?']
@@ -868,11 +868,11 @@ async function gCodeChallenge(verifier) {
 }
 
 async function loadGmail() {
-  const data = await gApi('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=is:unread');
+  const data = await gApi('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=15&q=in:inbox');
   if (!data || !data.messages) {
     document.getElementById('gmailSetup').style.display = 'none';
     document.getElementById('gmailList').style.display = 'block';
-    document.getElementById('gmailItems').innerHTML = '<div class="gmail-empty">Keine ungelesenen Mails 🎉</div>';
+    document.getElementById('gmailItems').innerHTML = '<div class="gmail-empty">Keine Mails im Posteingang 🎉</div>';
     return;
   }
   gmailMessages = [];
