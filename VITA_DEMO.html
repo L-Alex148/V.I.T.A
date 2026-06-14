@@ -1117,10 +1117,22 @@ function updateApiPill(ok) {
   document.getElementById('apiDot').className='dot '+(ok?'on':'off');
   document.getElementById('apiStatus').textContent=ok?'AKTIV':'KEIN KEY';
 }
+// ═══════════════════════════════════════
+// DEMO KEY — verschleiert, max 10 Nachrichten
+// ═══════════════════════════════════════
+const DEMO_KEY_ENC = 'c2stYW50LWFwaTAzLUEzRm5hR3ZxZGdHcTh0THEyeWZ6QzFuRm1IS0w5Q1FMTUtkTVpFb0dKZDNMRDdadGRCNy01QWZSOFhtZnV5ZzRaRkNSbkhaZGctS05TcmE1QmdJWDJnLXE0ZTBuZ0FB';
+const DEMO_MAX_MSGS = 10;
+let demoMsgCount = 0;
+
+function getDemoKey() {
+  return atob(DEMO_KEY_ENC);
+}
+
 function checkApiKey() {
-  const key=localStorage.getItem('vita_api_key');
-  if(key&&key.startsWith('sk-ant')) updateApiPill(true);
-  else setTimeout(()=>showApiKeyModal(),1200);
+  // Demo: always use built-in key, no modal
+  updateApiPill(true);
+  document.getElementById('apiPill').onclick = null;
+  document.getElementById('apiStatus').textContent = 'DEMO';
 }
 
 // ═══════════════════════════════════════
@@ -1413,32 +1425,45 @@ function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrol
 
 async function callVITA(userText) {
   if(isThinking)return;
+
+  // Demo rate limiting
+  demoMsgCount++;
+  if(demoMsgCount > DEMO_MAX_MSGS) {
+    addMessage('vita', `⏱️ **Demo-Limit erreicht!** Du hast ${DEMO_MAX_MSGS} Nachrichten genutzt.\n\nMöchtest du VITA selbst nutzen? Hol dir deinen kostenlosen API-Key:\n👉 **console.anthropic.com** → API-Schlüssel → Erstellen\n\nDann öffne: https://l-alex148.github.io/V.I.T.A/VITA_3.4.html`, []);
+    return;
+  }
+
+  // Show remaining messages
+  const remaining = DEMO_MAX_MSGS - demoMsgCount;
+  if(remaining <= 3 && remaining > 0) {
+    document.getElementById('vitaState').textContent = `Demo: noch ${remaining} Nachrichten`;
+  }
+
   isThinking=true;
   const st=document.getElementById('vitaState');
   st.textContent='Analysiere...';st.className='vita-state thinking';
   showTyping();
   history.push({role:'user',content:userText});
   try {
-    const apiKey=localStorage.getItem('vita_api_key')||'';
-    if(!apiKey){showApiKeyModal();isThinking=false;document.getElementById('typingIndicator')?.remove();return;}
+    const apiKey = getDemoKey();
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1000,system:buildSystemPrompt(),messages:history})
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:800,system:buildSystemPrompt(),messages:history})
     });
     if(!res.ok)throw new Error(`HTTP ${res.status}`);
     const data=await res.json();
     const reply=data.content?.[0]?.text||'Keine Antwort.';
     history.push({role:'assistant',content:reply});
     addMessage('vita',reply,getActions(userText));
-    st.textContent='Bereit · Alle Systeme aktiv';st.className='vita-state';
+    st.textContent=`Demo aktiv · ${remaining} Nachrichten übrig`;st.className='vita-state';
   }catch(err){
     document.getElementById('typingIndicator')?.remove();
     const msgs=document.getElementById('messages');
     const e=document.createElement('div');e.className='msg vita';
-    e.innerHTML=`<div class="msg-av vita">AI</div><div class="msg-content"><div class="msg-bubble"><div class="error-bubble">⚠️ API Fehler · Klick auf API-Pill oben<br><small style="opacity:0.6">${err.message}</small></div></div></div>`;
+    e.innerHTML=`<div class="msg-av vita">AI</div><div class="msg-content"><div class="msg-bubble"><div class="error-bubble">⚠️ Fehler: ${err.message}</div></div></div>`;
     msgs.appendChild(e);msgs.scrollTop=msgs.scrollHeight;
-    st.textContent='API Fehler';st.className='vita-state';
+    st.textContent='Fehler';st.className='vita-state';
   }
   isThinking=false;
 }
