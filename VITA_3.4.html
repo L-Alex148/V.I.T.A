@@ -16,8 +16,7 @@
   --panel:rgba(0,245,255,0.04);
 }
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:'Exo 2',sans-serif;min-height:100vh;overflow:hidden;}
-
+body{background:var(--bg);color:var(--text);font-family:'Exo 2',sans-serif;height:100vh;overflow:hidden;position:fixed;width:100%;}
 /* TRON GRID BACKGROUND */
 body::before{content:'';position:fixed;inset:0;
   background-image:
@@ -33,7 +32,7 @@ body::before{content:'';position:fixed;inset:0;
   opacity:0.3;animation:scanMove 8s linear infinite;pointer-events:none;z-index:50;}
 @keyframes scanMove{0%{top:0}100%{top:100vh}}
 
-.shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;}
+.shell{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
 
 /* ═══ HEADER ═══ */
 header{display:flex;align-items:center;justify-content:space-between;padding:8px 20px;
@@ -67,7 +66,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 
 /* ═══ PRIORITY BAR (top) ═══ */
 .priority-bar{display:flex;gap:8px;padding:8px 20px;
-  border-bottom:1px solid var(--border);background:rgba(1,10,15,0.7);flex-shrink:0;overflow-x:auto;}
+  border-bottom:1px solid var(--border);background:rgba(1,10,15,0.7);flex-shrink:0;overflow-x:auto;max-height:120px;}
 .priority-bar::-webkit-scrollbar{height:2px;}
 .priority-bar::-webkit-scrollbar-thumb{background:var(--border);}
 .prio-card{flex:1;min-width:160px;max-width:220px;padding:10px 12px;
@@ -95,10 +94,10 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .prio-action.low{color:var(--cyan2);border-color:rgba(0,245,255,0.2);background:var(--cyan-dim);}
 
 /* ═══ MAIN ═══ */
-.main{display:grid;grid-template-columns:1fr 280px;flex:1;overflow:hidden;}
+.main{display:grid;grid-template-columns:1fr 280px;flex:1;overflow:hidden;min-height:0;}
 
 /* ═══ CHAT ═══ */
-.chat-col{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);}
+.chat-col{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);min-height:0;height:100%;}
 .chat-topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 16px;
   border-bottom:1px solid var(--border);background:rgba(1,10,15,0.6);flex-shrink:0;gap:8px;flex-wrap:wrap;}
 .vita-id{display:flex;align-items:center;gap:8px;}
@@ -117,7 +116,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:8px
 .mode-pill.active{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim);}
 .mode-pill:hover{border-color:var(--cyan);color:var(--text);}
 
-.messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth;min-height:0;}
+.messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth;min-height:0;overscroll-behavior:contain;}
 .messages::-webkit-scrollbar{width:2px;}
 .messages::-webkit-scrollbar-thumb{background:var(--border);}
 .msg{display:flex;gap:10px;animation:msgIn 0.3s ease-out;}
@@ -903,6 +902,11 @@ async function loadGmail() {
   }
   renderGmailBlock();
   buildPriorityBar();
+  // Force scroll to bottom of chat after Gmail loads
+  setTimeout(()=>{
+    const msgs=document.getElementById('messages');
+    msgs.scrollTop=msgs.scrollHeight;
+  }, 200);
   // Add to knowledge base for Claude
   const kbText = gmailMessages.map(m => `VON: ${m.from}\nBETREFF: ${m.subject}\nINHALT: ${m.snippet}`).join('\n---\n');
   knowledgeBase.rawText = knowledgeBase.rawText.replace(/\n\n=== GMAIL.*$/s, '') + `\n\n=== GMAIL (${gmailMessages.length} ungelesen) ===\n${kbText}`;
@@ -1460,14 +1464,44 @@ function setMode(el,mode) {
 function toggleVoice() {
   const btn=document.getElementById('voiceBtn'),wf=document.getElementById('waveform'),inp=document.getElementById('userInput');
   if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)){addMessage('vita','⚠️ Spracheingabe nur in Chrome.');return;}
-  if(voiceActive){recognition?.stop();return;}
+  if(voiceActive){ stopAllRecognition(); return; }
+  // Stop wake word first, then start command mic
+  stopAllRecognition();
+  setTimeout(()=>startCommandMic(), 300);
+}
+
+function stopAllRecognition() {
+  voiceActive = false;
+  wakeWordActive = false;
+  try { wakeRecognition?.stop(); } catch(e){}
+  wakeRecognition = null;
+  const btn=document.getElementById('voiceBtn'), wf=document.getElementById('waveform');
+  btn?.classList.remove('recording');
+  wf?.classList.remove('active');
+  document.getElementById('userInput').placeholder='Frag mich alles, Alessandro...';
+}
+
+function startCommandMic() {
+  if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)) return;
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const recognition=new SR();
-  recognition.lang='de-CH';recognition.continuous=false;recognition.interimResults=true;
-  recognition.onstart=()=>{voiceActive=true;btn.classList.add('recording');wf.classList.add('active');inp.placeholder='🎙️ VITA hört zu...';};
-  recognition.onresult=e=>{inp.value=Array.from(e.results).map(r=>r[0].transcript).join('');};
-  recognition.onend=()=>{voiceActive=false;btn.classList.remove('recording');wf.classList.remove('active');inp.placeholder='Frag mich alles, Alessandro...';if(inp.value.trim())sendMessage();};
-  recognition.start();
+  const rec=new SR();
+  const btn=document.getElementById('voiceBtn'), wf=document.getElementById('waveform'), inp=document.getElementById('userInput');
+  rec.lang='de-CH'; rec.continuous=false; rec.interimResults=true;
+  rec.onstart=()=>{ voiceActive=true; btn.classList.add('recording'); wf.classList.add('active'); inp.placeholder='🎙️ VITA hört zu...'; };
+  rec.onresult=e=>{ inp.value=Array.from(e.results).map(r=>r[0].transcript).join(''); };
+  rec.onend=()=>{
+    voiceActive=false; btn.classList.remove('recording'); wf.classList.remove('active');
+    inp.placeholder='Frag mich alles, Alessandro...';
+    if(inp.value.trim()) sendMessage();
+    // Restart wake word after command
+    setTimeout(startWakeWordListener, 1000);
+  };
+  rec.onerror=()=>{
+    voiceActive=false; btn.classList.remove('recording'); wf.classList.remove('active');
+    inp.placeholder='Frag mich alles, Alessandro...';
+    setTimeout(startWakeWordListener, 1000);
+  };
+  try { rec.start(); } catch(e){}
 }
 
 // ═══════════════════════════════════════
@@ -1912,44 +1946,11 @@ function startWakeWordListener() {
 }
 
 function triggerWakeWord() {
-  // Visual feedback
   showToast('🎙️ VITA AKTIV', 'Ich höre zu — was kann ich für dich tun?');
-  const btn = document.getElementById('voiceBtn');
-  btn.classList.add('recording');
-
-  // Short beep / flash
   document.querySelector('.logo-icon').style.boxShadow = '0 0 30px var(--cyan)';
   setTimeout(() => document.querySelector('.logo-icon').style.boxShadow = '', 800);
-
-  // Start command recognition
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const cmdRec = new SR();
-  cmdRec.lang = 'de-CH';
-  cmdRec.continuous = false;
-  cmdRec.interimResults = false;
-  cmdRec.maxAlternatives = 1;
-
-  const inp = document.getElementById('userInput');
-  inp.placeholder = '🎙️ VITA hört zu...';
-
-  cmdRec.onresult = (e) => {
-    const cmd = e.results[0][0].transcript;
-    inp.value = cmd;
-    sendMessage();
-  };
-  cmdRec.onend = () => {
-    btn.classList.remove('recording');
-    inp.placeholder = 'Frag mich alles, Alessandro...';
-    // Restart wake word listener
-    setTimeout(startWakeWordListener, 500);
-  };
-  cmdRec.onerror = () => {
-    btn.classList.remove('recording');
-    inp.placeholder = 'Frag mich alles, Alessandro...';
-    setTimeout(startWakeWordListener, 500);
-  };
-
-  try { cmdRec.start(); } catch(e) { setTimeout(startWakeWordListener, 500); }
+  // Use the same command mic — no conflicts
+  setTimeout(()=>startCommandMic(), 200);
 }
 
 // Start wake word on load (after a short delay)
